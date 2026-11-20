@@ -1,0 +1,207 @@
+name: boilerplate_agente
+
+services:
+  db:
+    image: pgvector/pgvector:pg17
+    container_name: rag_postgres_db
+    restart: unless-stopped
+    command: postgres -c max_connections=30 -c shared_buffers=${POSTGRES_SHARED_BUFFERS:-128MB} -c work_mem=4MB -c maintenance_work_mem=32MB -c effective_cache_size=${POSTGRES_EFFECTIVE_CACHE_SIZE:-256MB}
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:?Defina POSTGRES_USER no arquivo .env}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Defina POSTGRES_PASSWORD no arquivo .env}
+      POSTGRES_DB: ${POSTGRES_DB:?Defina POSTGRES_DB no arquivo .env}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./docker/postgres/init_chatwoot_db.sh:/docker-entrypoint-initdb.d/init_chatwoot_db.sh:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    deploy:
+      resources:
+        limits:
+          memory: ${POSTGRES_MEM:-256M}
+        reservations:
+          memory: 128M
+
+  redis:
+    image: redis:7-alpine
+    container_name: rag_redis
+    restart: unless-stopped
+    command: ["redis-server", "--maxmemory", "64mb", "--maxmemory-policy", "noeviction", "--save", ""]
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    deploy:
+      resources:
+        limits:
+          memory: 96M
+        reservations:
+          memory: 32M
+
+  chatwoot_web:
+    image: chatwoot/chatwoot:v4.18.0@sha256:a4b7eea7353a9b585d0f29f2c57c7549710db961b119f7f1561b2fe964f48f65
+    container_name: chatwoot_web
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    env_file:
+      - .env
+    environment:
+      NODE_ENV: production
+      RAILS_ENV: production
+      INSTALLATION_ENV: docker
+      POSTGRES_HOST: db
+      POSTGRES_PORT: 5432
+      POSTGRES_DATABASE: chatwoot_production
+      POSTGRES_USERNAME: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/chatwoot_production
+      REDIS_URL: redis://redis:6379
+      SECRET_KEY_BASE: ${SECRET_KEY_BASE}
+      FRONTEND_URL: ${FRONTEND_URL:-http://localhost:3000}
+      DEFAULT_LOCALE: ${CHATWOOT_LOCALE:-pt_BR}
+      FORCE_SSL: "false"
+      ENABLE_ACCOUNT_SIGNUP: "false"
+      ACTIVE_STORAGE_SERVICE: local
+      SAFE_FETCH_ALLOW_PRIVATE_NETWORK: "true"
+      WEB_CONCURRENCY: "0"
+      RAILS_MAX_THREADS: ${RAILS_MAX_THREADS:-3}
+      SIDEKIQ_CONCURRENCY: ${SIDEKIQ_CONCURRENCY:-3}
+      DB_POOL_REAPING_FREQUENCY: "10"
+      LOG_LEVEL: ${LOG_LEVEL:-warn}
+      DISABLE_TELEMETRY: "true"
+    entrypoint: docker/entrypoints/rails.sh
+    command: ["bundle", "exec", "rails", "s", "-p", "3000", "-b", "0.0.0.0"]
+    volumes:
+      - chatwoot_storage:/app/storage
+    expose:
+      - "3000"
+    deploy:
+      resources:
+        limits:
+          memory: ${CHATWOOT_WEB_MEM:-512M}
+        reservations:
+          memory: 256M
+    networks:
+      default:
+        aliases:
+          - chatwoot
+      rede_compartilhada: {}
+
+  chatwoot_worker:
+    image: chatwoot/chatwoot:v4.18.0@sha256:a4b7eea7353a9b585d0f29f2c57c7549710db961b119f7f1561b2fe964f48f65
+    container_name: chatwoot_worker
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    env_file:
+      - .env
+    environment:
+      NODE_ENV: production
+      RAILS_ENV: production
+      INSTALLATION_ENV: docker
+      POSTGRES_HOST: db
+      POSTGRES_PORT: 5432
+      POSTGRES_DATABASE: chatwoot_production
+      POSTGRES_USERNAME: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/chatwoot_production
+      REDIS_URL: redis://redis:6379
+      SECRET_KEY_BASE: ${SECRET_KEY_BASE}
+      FRONTEND_URL: ${FRONTEND_URL:-http://localhost:3000}
+      DEFAULT_LOCALE: ${CHATWOOT_LOCALE:-pt_BR}
+      FORCE_SSL: "false"
+      ENABLE_ACCOUNT_SIGNUP: "false"
+      ACTIVE_STORAGE_SERVICE: local
+      SAFE_FETCH_ALLOW_PRIVATE_NETWORK: "true"
+      WEB_CONCURRENCY: "0"
+      RAILS_MAX_THREADS: ${RAILS_MAX_THREADS:-3}
+      SIDEKIQ_CONCURRENCY: ${SIDEKIQ_CONCURRENCY:-3}
+      DB_POOL_REAPING_FREQUENCY: "10"
+      LOG_LEVEL: ${LOG_LEVEL:-warn}
+      DISABLE_TELEMETRY: "true"
+    entrypoint: docker/entrypoints/rails.sh
+    command: ["bundle", "exec", "sidekiq", "-C", "config/sidekiq.yml"]
+    volumes:
+      - chatwoot_storage:/app/storage
+    deploy:
+      resources:
+        limits:
+          memory: ${CHATWOOT_WORKER_MEM:-512M}
+        reservations:
+          memory: 256M
+
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: rag_agent_app
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    env_file:
+      - .env
+    environment:
+      PORT: ${PORT:-3001}
+      POSTGRES_HOST: db
+      POSTGRES_PORT: 5432
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
+      LOG_DIR: /app/logs
+    volumes:
+      - ./logs:/app/logs
+      - ./cod_fonte/rag/doc_bruto:/app/cod_result/rag/doc_bruto:ro
+    expose:
+      - "${PORT:-3001}"
+    deploy:
+      resources:
+        limits:
+          memory: ${APP_MEM:-384M}
+        reservations:
+          memory: 128M
+    networks:
+      default:
+        aliases:
+          - agente.local
+      rede_compartilhada:
+        aliases:
+          - agente.local
+
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    container_name: rag_cloudflared
+    restart: unless-stopped
+    command: tunnel --no-autoupdate run --token ${CLOUDFLARE_TUNNEL_TOKEN:?Defina CLOUDFLARE_TUNNEL_TOKEN no arquivo .env}
+    depends_on:
+      - chatwoot_web
+    deploy:
+      resources:
+        limits:
+          memory: ${CLOUDFLARED_MEM:-64M}
+        reservations:
+          memory: 32M
+    networks:
+      - default
+      - rede_compartilhada
+
+networks:
+  rede_compartilhada:
+    name: agente_rede_compartilhada
+
+volumes:
+  postgres_data:
+  redis_data:
+  chatwoot_storage:

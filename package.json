@@ -1,0 +1,57 @@
+{
+  "name": "boilerplate_agente",
+  "version": "1.0.0",
+  "description": "Boilerplate de agente de IA com RAG (PostgreSQL + pgvector) e integracao com Chatwoot",
+  "license": "CC0-1.0",
+  "main": "cod_result/server.js",
+  "scripts": {
+    "start": "node cod_result/server.js",
+    "dev": "ts-node-dev --respawn --transpile-only cod_fonte/server.ts",
+    "build": "tsc && copyfiles -u 1 \"cod_fonte/rag/doc_bruto/**/*\" \"cod_fonte/rag/doc_markdown/**/*\" cod_result",
+    "db:push": "prisma db push",
+    "db:seed": "prisma db seed",
+    "db:reset": "ts-node cod_fonte/database/reset.ts",
+    "db:all": "npm run db:reset && npm run db:push && npm run db:seed",
+    "test:guardrails": "ts-node cod_fonte/test/test_guardrails.ts",
+    "test:auth": "ts-node cod_fonte/test/test_auth.ts",
+    "test:ratelimit": "ts-node cod_fonte/test/test_rate_limiter.ts",
+    "test:webhook": "ts-node cod_fonte/test/test_webhook.ts",
+    "test:logging": "ts-node cod_fonte/test/test_logging.ts",
+    "test:queue": "ts-node cod_fonte/test/test_conversation_queue.ts",
+    "test:handoff": "ts-node cod_fonte/test/test_handoff.ts",
+    "test:persistence": "ts-node cod_fonte/test/test_persistence.ts",
+    "test:prompt": "ts-node cod_fonte/test/test_agent_prompt.ts",
+    "test:webhook_auth": "ts-node cod_fonte/test/test_webhook_auth.ts",
+    "test:loop_agente": "ts-node cod_fonte/test/test_loop_agente.ts",
+    "test": "ts-node cod_fonte/test/test_runner.ts"
+  },
+  "prisma": {
+    "seed": "ts-node cod_fonte/database/seed.ts"
+  },
+  "dependencies": {
+    "@langchain/core": "^1.2.3",
+    "@langchain/openai": "^1.5.5",
+    "@prisma/adapter-pg": "^7.8.0",
+    "@prisma/client": "^7.8.0",
+    "@prisma/config": "^7.8.0",
+    "axios": "^1.18.1",
+    "cors": "^2.8.6",
+    "dotenv": "^16.4.5",
+    "express": "^4.19.2",
+    "langsmith": "^0.10.2",
+    "pdf-parse": "^2.4.5",
+    "prisma": "^7.8.0",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@types/cors": "^2.8.19",
+    "@types/express": "^5.0.6",
+    "@types/node": "^26.1.1",
+    "@types/pdf-parse": "^1.1.5",
+    "@types/pg": "^8.20.0",
+    "copyfiles": "^2.4.1",
+    "ts-node": "^10.9.2",
+    "ts-node-dev": "^2.0.0",
+    "typescript": "^5.7.3"
+  }
+}
